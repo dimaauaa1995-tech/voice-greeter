@@ -1,7 +1,9 @@
 FROM python:3.11-slim
 
-# ffmpeg потрібен для програвання mp3
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+# ffmpeg + голосові бібліотеки (opus, sodium)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg libopus0 libsodium23 && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY requirements.txt .
