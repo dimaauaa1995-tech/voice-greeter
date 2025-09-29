@@ -1,17 +1,29 @@
-import os, asyncio, discord
+import os, asyncio, threading, http.server, socketserver, discord
 from discord.ext import commands
 from discord import FFmpegPCMAudio
 
-TOKEN = os.getenv("DISCORD_TOKEN")  # вставимо в хостингу як змінну середовища
+# ---- Keepalive HTTP server (для Render) ----
+def run_keepalive():
+    port = int(os.getenv("PORT", "10000"))
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, format, *args):  # тиша в логах
+            pass
+    with socketserver.TCPServer(("", port), Handler) as httpd:
+        httpd.serve_forever()
+
+threading.Thread(target=run_keepalive, daemon=True).start()
+# --------------------------------------------
+
+TOKEN = os.getenv("DISCORD_TOKEN")          # додамо на Render
 WELCOME_FILE = os.getenv("WELCOME_FILE", "greeting.mp3")
-CHANNEL_WHITELIST = os.getenv("CHANNEL_WHITELIST")  # необов'язково: список ID каналів через кому
+CHANNEL_WHITELIST = os.getenv("CHANNEL_WHITELIST")  # опційно: ID voice-каналів через кому
 
 intents = discord.Intents.default()
 intents.guilds = True
 intents.voice_states = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-recent_greeted = {}  # антиспам
+recent_greeted = {}
 
 @bot.event
 async def on_ready():
@@ -23,14 +35,13 @@ def should_greet(member, channel_id):
     key = (member.id, channel_id)
     now = asyncio.get_event_loop().time()
     last = recent_greeted.get(key)
-    if last and now - last < 10:  # не частіше ніж раз на 10 сек для однієї пари користувач-канал
+    if last and now - last < 10:
         return False
     recent_greeted[key] = now
     return True
 
 @bot.event
 async def on_voice_state_update(member, before, after):
-    # реагуємо лише коли користувач ЗАЙШОВ у voice
     if before.channel is None and after.channel is not None:
         channel = after.channel
         if CHANNEL_WHITELIST:
@@ -40,18 +51,13 @@ async def on_voice_state_update(member, before, after):
         if not should_greet(member, channel.id):
             return
         try:
-            # підключаємось або пересуваємось у потрібний канал
             vc = discord.utils.get(bot.voice_clients, guild=member.guild)
             if vc and vc.is_connected():
                 await vc.move_to(channel)
             else:
                 vc = await channel.connect()
 
-            # граємо файл
-            source = FFmpegPCMAudio(WELCOME_FILE)
-            vc.play(source)
-
-            # чекаємо завершення
+            vc.play(FFmpegPCMAudio(WELCOME_FILE))
             while vc.is_playing():
                 await asyncio.sleep(0.2)
             await asyncio.sleep(0.3)
